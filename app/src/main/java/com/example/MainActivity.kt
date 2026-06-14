@@ -226,9 +226,9 @@ fun MainGalleryScreen(viewModel: GalleryViewModel) {
                         .liquidGlassBackdrop(
                             mainBarRect = { mainBarRect },
                             densityBarRect = { densityBarRect },
-                            searchBarRect = { searchBarRect },
-                            searchFabRect = { searchFabRect },
-                            selectBtnRect = { selectBtnRect },
+                            searchBarRect = { androidx.compose.ui.geometry.Rect.Zero },
+                            searchFabRect = { androidx.compose.ui.geometry.Rect.Zero },
+                            selectBtnRect = { androidx.compose.ui.geometry.Rect.Zero },
                             collapsedFabRect = { collapsedFabRect }
                         )
                 ) {
