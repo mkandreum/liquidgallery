@@ -1,0 +1,6 @@
+{
+  "name": "Cristal",
+  "description": "Una galería de fotos premium con efecto cristal líquido, edición de metadatos, álbumes a medida y gestor de archivos reales.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
