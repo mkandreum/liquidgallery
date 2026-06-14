@@ -1,21 +1,60 @@
 <div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
+
+# 🪞 Liquid Glass Gallery
+
+**Galería multimedia con interfaz de cristal líquido**
+
+*Un producto de [Xyon Platforms](https://github.com/mkandreum)*
+
+![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?style=flat&logo=kotlin&logoColor=white)
+![Android](https://img.shields.io/badge/Android-3DDC84?style=flat&logo=android&logoColor=white)
+![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-4285F4?style=flat&logo=jetpackcompose&logoColor=white)
+![Coil](https://img.shields.io/badge/Coil-FF6F00?style=flat&logo=coil&logoColor=white)
+
 </div>
 
-# Run and deploy your AI Studio app
+---
 
-This contains everything you need to run your app locally.
+## ¿Qué es Liquid Glass Gallery?
 
-View your app in AI Studio: https://ai.studio/apps/15654dc4-a47a-4ccc-baea-4e75db54cebe
+Liquid Glass Gallery es una aplicación Android nativa desarrollada en Kotlin por Xyon Platforms que permite visualizar imágenes y vídeos con una interfaz de **cristal líquido** con efectos de refracción, distorsión tipo lupa y aberración cromática dinámica vía shaders AGSL.
 
-## Run Locally
+## ✨ Funcionalidades
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+- **Galería multimedia** con imágenes y vídeos del dispositivo
+- **Efecto cristal líquido** con distorsión tipo lupa, blur y aberración cromática en cada barra flotante
+- **Reproductor de vídeo** con barra de progreso glass, timer y controles con auto-hide
+- **Zoom interactivo** con gestos pinch-to-zoom y doble tap (1x–4x)
+- **Filtros de imagen** en tiempo real (brillo, contraste, saturación, rotación) con matriz de color
+- **Miniaturas de vídeo** generadas con `MediaMetadataRetriever`
+- **Navegación por swipe** con `HorizontalPager` y efecto parallax
+- **Modo selección múltiple** con acciones en lote
+- **Colecciones inteligentes** por ubicación, favoritos y álbumes personalizados
+- **Modo oculto** con autenticación biométrica
 
+## 🛠️ Stack técnico
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+| Capa | Tecnología |
+|------|----------|
+| Lenguaje | Kotlin |
+| Plataforma | Android (minSdk 34, targetSdk 36) |
+| UI | Jetpack Compose + Material3 |
+| Imágenes | Coil (thumbnail + full-res) |
+| Vídeo | VideoView nativo |
+| Shaders | AGSL (RuntimeShader) vía `GraphicsLayer.renderEffect` |
+| Persistencia | Room (cache + metadatos) |
+| Arquitectura | MVVM (ViewModel + StateFlow) |
+
+## 🚀 Instalación
+
+```bash
+git clone https://github.com/mkandreum/liquidgallery.git
+cd liquidgallery
+# Abrir con Android Studio y compilar
+```
+
+## 🏢 Xyon Platforms
+
+Liquid Glass Gallery es un producto desarrollado y mantenido por **Xyon Platforms**, empresa especializada en soluciones digitales para negocios locales y pymes.
+
+> © Xyon Platforms — Todos los derechos reservados
