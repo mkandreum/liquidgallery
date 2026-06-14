@@ -37,7 +37,7 @@ val LIQUID_GLASS_SHADER = """
 
         // 2. Apply distortion across the entire area, pronounced at the edges with a smoother, wider curvature
         float edgeFactor = clamp(1.0 + sdf / r, 0.0, 1.0); // 1.0 at edge, 0.0 at center
-        float lensFactor = 0.35 + 0.65 * pow(edgeFactor, 1.5);
+        float lensFactor = 0.25 + 0.75 * pow(edgeFactor, 1.2);
 
         // 3. Static refraction (no movement/shimmer over time)
         // Calculate the normal pointing outward from the boundary
@@ -55,33 +55,34 @@ val LIQUID_GLASS_SHADER = """
         }
 
         // Apply static refraction offset peaking inside the border band
-        float2 distortedCoord = coord + dir * (18.0 * lensFactor);
+        float2 distortedCoord = coord + dir * (32.0 * lensFactor);
 
         // 4. Chromatic aberration: split RGB channels radially
         // Red shifts outward, Blue shifts inward, Green stays centered
-        float chromaStrength = 3.5 * pow(edgeFactor, 1.2);
+        float chromaStrength = 7.0 * pow(edgeFactor, 0.9);
         float2 rCoord = distortedCoord + dir * chromaStrength;
-        float2 bCoord = distortedCoord - dir * chromaStrength * 0.8;
+        float2 bCoord = distortedCoord - dir * chromaStrength * 0.75;
 
         // 5-tap box blur for each color channel (using original distorted coord for green)
+        float blurOff = 2.5;
         float2 c0 = clamp(distortedCoord, float2(0.0), resolution);
-        float2 c1 = clamp(distortedCoord + float2(-1.5, 0.0), float2(0.0), resolution);
-        float2 c2 = clamp(distortedCoord + float2(1.5, 0.0), float2(0.0), resolution);
-        float2 c3 = clamp(distortedCoord + float2(0.0, -1.5), float2(0.0), resolution);
-        float2 c4 = clamp(distortedCoord + float2(0.0, 1.5), float2(0.0), resolution);
+        float2 c1 = clamp(distortedCoord + float2(-blurOff, 0.0), float2(0.0), resolution);
+        float2 c2 = clamp(distortedCoord + float2(blurOff, 0.0), float2(0.0), resolution);
+        float2 c3 = clamp(distortedCoord + float2(0.0, -blurOff), float2(0.0), resolution);
+        float2 c4 = clamp(distortedCoord + float2(0.0, blurOff), float2(0.0), resolution);
 
         // Same blur pattern for R and B but at their offset positions
         float2 r0 = clamp(rCoord, float2(0.0), resolution);
-        float2 r1 = clamp(rCoord + float2(-1.5, 0.0), float2(0.0), resolution);
-        float2 r2 = clamp(rCoord + float2(1.5, 0.0), float2(0.0), resolution);
-        float2 r3 = clamp(rCoord + float2(0.0, -1.5), float2(0.0), resolution);
-        float2 r4 = clamp(rCoord + float2(0.0, 1.5), float2(0.0), resolution);
+        float2 r1 = clamp(rCoord + float2(-blurOff, 0.0), float2(0.0), resolution);
+        float2 r2 = clamp(rCoord + float2(blurOff, 0.0), float2(0.0), resolution);
+        float2 r3 = clamp(rCoord + float2(0.0, -blurOff), float2(0.0), resolution);
+        float2 r4 = clamp(rCoord + float2(0.0, blurOff), float2(0.0), resolution);
 
         float2 b0 = clamp(bCoord, float2(0.0), resolution);
-        float2 b1 = clamp(bCoord + float2(-1.5, 0.0), float2(0.0), resolution);
-        float2 b2 = clamp(bCoord + float2(1.5, 0.0), float2(0.0), resolution);
-        float2 b3 = clamp(bCoord + float2(0.0, -1.5), float2(0.0), resolution);
-        float2 b4 = clamp(bCoord + float2(0.0, 1.5), float2(0.0), resolution);
+        float2 b1 = clamp(bCoord + float2(-blurOff, 0.0), float2(0.0), resolution);
+        float2 b2 = clamp(bCoord + float2(blurOff, 0.0), float2(0.0), resolution);
+        float2 b3 = clamp(bCoord + float2(0.0, -blurOff), float2(0.0), resolution);
+        float2 b4 = clamp(bCoord + float2(0.0, blurOff), float2(0.0), resolution);
 
         half4 color;
         color.r = (
@@ -99,8 +100,8 @@ val LIQUID_GLASS_SHADER = """
         color.a = 1.0;
 
         // Ambient blue-white liquid glass tinting fading to the center
-        half3 glassTint = half3(0.93, 0.96, 1.0);
-        color.rgb = mix(color.rgb, glassTint, 0.05 * edgeFactor);
+        half3 glassTint = half3(0.92, 0.95, 1.0);
+        color.rgb = mix(color.rgb, glassTint, 0.08 * edgeFactor);
 
         return color;
     }

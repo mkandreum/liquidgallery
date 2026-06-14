@@ -903,17 +903,20 @@ private fun GalleryGridItemCell(
 
             LaunchedEffect(item.uri) {
                 if (videoThumbBitmap == null) {
-                    try {
-                        val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            val retriever = android.media.MediaMetadataRetriever()
+                    val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        val retriever = android.media.MediaMetadataRetriever()
+                        try {
                             retriever.setDataSource(context, android.net.Uri.parse(item.uri))
-                            val frame = retriever.getFrameAtTime(0)
+                            retriever.getFrameAtTime(0)
+                        } catch (e: Exception) {
+                            android.util.Log.e("GridCell", "video thumbnail failed: ${item.uri}", e)
+                            null
+                        } finally {
                             retriever.release()
-                            frame
                         }
+                    }
+                    if (bitmap != null) {
                         videoThumbBitmap = bitmap
-                    } catch (e: Exception) {
-                        android.util.Log.e("GridCell", "video thumbnail failed: ${item.uri}", e)
                     }
                 }
             }
