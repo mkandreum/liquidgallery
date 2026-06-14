@@ -35,12 +35,13 @@ val LIQUID_GLASS_SHADER = """
         // If outside the rounded pill boundary, return background as-is (keeps perfect pill shape)
         if (sdf > 0.0) return baseColor;
 
-        // 2. Apply distortion across the entire area, pronounced at the edges with a smoother, wider curvature
-        float edgeFactor = clamp(1.0 + sdf / r, 0.0, 1.0); // 1.0 at edge, 0.0 at center
-        float lensFactor = 0.25 + 0.75 * pow(edgeFactor, 1.2);
+        // 2. Calculate edge factor (0 at center, 1 at edge) and surface normal
+        float edgeFactor = clamp(1.0 + sdf / r, 0.0, 1.0);
 
-        // 3. Static refraction (no movement/shimmer over time)
-        // Calculate the normal pointing outward from the boundary
+        // Wider curvature profile — "ángulo más abierto"
+        float edgeDepth = pow(edgeFactor, 0.85);
+
+        // 3. Surface normal pointing outward from the pill boundary
         float2 capCenterOffset = float2(max(0.0, halfSize.x - r), 0.0);
         float2 localCapCoord = coord - center;
         
@@ -54,24 +55,22 @@ val LIQUID_GLASS_SHADER = """
             dir = float2(0.0, localCapCoord.y >= 0.0 ? 1.0 : -1.0);
         }
 
-        // Apply static refraction offset peaking inside the border band
-        float2 distortedCoord = coord + dir * (32.0 * lensFactor);
+        // 4. Refraction displacement — subtle glass-lens warp
+        float2 distortedCoord = coord + dir * (14.0 * edgeDepth);
 
-        // 4. Chromatic aberration: split RGB channels radially
-        // Red shifts outward, Blue shifts inward, Green stays centered
-        float chromaStrength = 7.0 * pow(edgeFactor, 0.9);
+        // 5. Chromatic aberration: split RGB radially
+        float chromaStrength = 5.0 * pow(edgeFactor, 0.9);
         float2 rCoord = distortedCoord + dir * chromaStrength;
         float2 bCoord = distortedCoord - dir * chromaStrength * 0.75;
 
-        // 5-tap box blur for each color channel (using original distorted coord for green)
-        float blurOff = 2.5;
+        // 6. Blur and sample each channel
+        float blurOff = 2.0;
         float2 c0 = clamp(distortedCoord, float2(0.0), resolution);
         float2 c1 = clamp(distortedCoord + float2(-blurOff, 0.0), float2(0.0), resolution);
         float2 c2 = clamp(distortedCoord + float2(blurOff, 0.0), float2(0.0), resolution);
         float2 c3 = clamp(distortedCoord + float2(0.0, -blurOff), float2(0.0), resolution);
         float2 c4 = clamp(distortedCoord + float2(0.0, blurOff), float2(0.0), resolution);
 
-        // Same blur pattern for R and B but at their offset positions
         float2 r0 = clamp(rCoord, float2(0.0), resolution);
         float2 r1 = clamp(rCoord + float2(-blurOff, 0.0), float2(0.0), resolution);
         float2 r2 = clamp(rCoord + float2(blurOff, 0.0), float2(0.0), resolution);
@@ -99,9 +98,25 @@ val LIQUID_GLASS_SHADER = """
         ) * 0.2;
         color.a = 1.0;
 
-        // Ambient blue-white liquid glass tinting fading to the center
+        // 7. 3D curved glass shading
+        // Light from upper-left: surfaces facing upper-left catch the light
+        float lightDot = dir.x * 0.707 + dir.y * 0.707; // -1 (shadow) to 1 (lit)
+
+        // Edge shadow — simulates glass thickness curving away from light
+        float shadow = 1.0 - edgeDepth * 0.28 * clamp(1.0 - lightDot, 0.0, 1.0);
+        color.rgb *= shadow;
+
+        // Rim light — glass edge catching light on the lit side
+        float rimLight = edgeDepth * 0.18 * clamp(lightDot, 0.0, 1.0);
+        color.rgb += half3(rimLight * 0.92, rimLight * 0.96, rimLight);
+
+        // Specular reflection band — bright highlight at the curvature peak
+        float specular = pow(edgeDepth, 3.0) * 0.35 * pow(clamp(lightDot, 0.0, 1.0), 3.0);
+        color.rgb += half3(specular * 0.85, specular * 0.92, specular);
+
+        // 8. Blue-white glass tint fading to edges
         half3 glassTint = half3(0.92, 0.95, 1.0);
-        color.rgb = mix(color.rgb, glassTint, 0.08 * edgeFactor);
+        color.rgb = mix(color.rgb, glassTint, 0.06 * edgeFactor);
 
         return color;
     }
