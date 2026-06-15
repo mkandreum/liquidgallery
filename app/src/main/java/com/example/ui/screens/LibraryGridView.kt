@@ -112,22 +112,6 @@ fun LibraryGridView(
         }
     }
 
-    // Pre-cache all thumbnails when the list of items is populated/updated
-    val preloadContext = LocalContext.current
-    LaunchedEffect(items) {
-        if (items.isNotEmpty()) {
-            val loader = coil.Coil.imageLoader(preloadContext)
-            items.forEach { item ->
-                val preloadRequest = ImageRequest.Builder(preloadContext)
-                    .data(item.uri)
-                    .size(180)
-                    .memoryCachePolicy(CachePolicy.ENABLED)
-                    .diskCachePolicy(CachePolicy.ENABLED)
-                    .build()
-                loader.enqueue(preloadRequest)
-            }
-        }
-    }
 
     // Context long-press custom glass overlay menu variables
     var longPressedItem by remember { mutableStateOf<MediaItem?>(null) }
@@ -463,7 +447,7 @@ fun LibraryGridView(
                     Box(
                         modifier = Modifier
                             .wrapContentSize()
-                            .clip(RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(24.dp))
                             .background(
                                 if (isSelectionMode) Color.White
                                 else if (isShaderActive) Color.Transparent else GlassBarFill
@@ -471,10 +455,10 @@ fun LibraryGridView(
                             .border(
                                 1.dp,
                                 if (isSelectionMode || isShaderActive) Color.Transparent else GlassBarBorder,
-                                RoundedCornerShape(20.dp)
+                                RoundedCornerShape(24.dp)
                             )
                             .clickable { viewModel.toggleSelectionMode() }
-                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                            .padding(horizontal = 18.dp, vertical = 8.dp)
                             .onGloballyPositioned { coords ->
                                 if (coords.isAttached) {
                                     onSelectBtnRectChanged(coords.boundsInRoot())
@@ -487,7 +471,7 @@ fun LibraryGridView(
                         Text(
                             if (isSelectionMode) "Cancelar" else "Seleccionar",
                             color = if (isSelectionMode) Color.Black else Color.White,
-                            fontSize = 13.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }

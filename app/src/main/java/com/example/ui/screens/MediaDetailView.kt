@@ -391,11 +391,6 @@ fun MediaDetailView(
                         }
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
                         AndroidView(
                             factory = { context ->
                                 VideoView(context).apply {
@@ -419,10 +414,7 @@ fun MediaDetailView(
                                     isVideoPlaying = true
                                 }
                             },
-                            modifier = Modifier
-                                .fillMaxSize(0.92f)
-                                .clip(RoundedCornerShape(24.dp))
-                                .border(1.5.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(24.dp))
+                            modifier = Modifier.fillMaxSize()
                         )
 
                         // Gesture overlay Box for Swipe down and Play/Pause control
@@ -507,7 +499,6 @@ fun MediaDetailView(
                                 )
                             }
                         }
-                    }
                 } else {
                     // Interactive Zoomable image (Pan & Scale)
                     var scale by remember(pageItem.id) { mutableStateOf(1f) }
