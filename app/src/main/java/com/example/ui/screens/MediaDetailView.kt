@@ -1,6 +1,6 @@
 package com.example.ui.screens
 
-import android.widget.VideoView
+import android.media.MediaPlayer
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -313,131 +313,130 @@ fun MediaDetailView(
             ) {
                 if (pageItem.isVideo) {
                     val isCurrentPage = pagerState.currentPage == pageIndex
-                    var isVideoPlaying by remember(pageItem.id) { mutableStateOf(false) }
-                    var videoPosition by remember(pageItem.id) { mutableLongStateOf(0L) }
-                    var videoDuration by remember(pageItem.id) { mutableLongStateOf(0L) }
-                    var videoReady by remember(pageItem.id) { mutableStateOf(false) }
-                    val videoViewRef = remember { mutableStateOf<VideoView?>(null) }
+                    val mediaPlayerRef = remember { mutableStateOf<MediaPlayer?>(null) }
+
+                    var isPlaying by remember(pageItem.id) { mutableStateOf(false) }
+                    var mediaPosition by remember(pageItem.id) { mutableLongStateOf(0L) }
+                    var mediaDuration by remember(pageItem.id) { mutableLongStateOf(0L) }
+                    var isReady by remember(pageItem.id) { mutableStateOf(false) }
 
                     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
                     DisposableEffect(lifecycleOwner, pageItem.id, isCurrentPage) {
                         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-                            val vv = videoViewRef.value
-                            if (vv != null && isCurrentPage && videoReady) {
+                            val mp = mediaPlayerRef.value
+                            if (mp != null && isCurrentPage && isReady) {
                                 when (event) {
                                     androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> {
-                                        vv.pause()
-                                        isVideoPlaying = false
+                                        if (mp.isPlaying) { mp.pause(); isPlaying = false }
                                     }
                                     androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
-                                        vv.start()
-                                        isVideoPlaying = true
+                                        if (!mp.isPlaying) { mp.start(); isPlaying = true }
                                     }
                                     else -> {}
                                 }
                             }
                         }
                         lifecycleOwner.lifecycle.addObserver(observer)
-                        onDispose {
-                            lifecycleOwner.lifecycle.removeObserver(observer)
-                        }
+                        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
                     }
 
                     DisposableEffect(pageItem.id) {
                         onDispose {
-                            videoViewRef.value?.stopPlayback()
-                            videoViewRef.value = null
-                            videoReady = false
+                            mediaPlayerRef.value?.apply {
+                                if (isPlaying) stop()
+                                release()
+                            }
+                            mediaPlayerRef.value = null
+                            isReady = false
                         }
                     }
 
                     LaunchedEffect(isCurrentPage) {
-                        val vv = videoViewRef.value ?: return@LaunchedEffect
-                        if (isCurrentPage) {
-                            vv.start()
-                            isVideoPlaying = true
-                        } else {
-                            vv.pause()
-                            isVideoPlaying = false
-                        }
+                        val mp = mediaPlayerRef.value ?: return@LaunchedEffect
+                        if (isCurrentPage) { if (!mp.isPlaying) { mp.start(); isPlaying = true } }
+                        else { if (mp.isPlaying) { mp.pause(); isPlaying = false } }
                     }
 
-                    LaunchedEffect(isVideoPlaying, videoReady) {
-                        if (isVideoPlaying && videoReady) {
+                    LaunchedEffect(isPlaying, isReady) {
+                        if (isPlaying && isReady) {
                             while (true) {
-                                val vv = videoViewRef.value
-                                if (vv != null && vv.isPlaying) {
-                                    videoPosition = vv.currentPosition.toLong()
-                                    videoDuration = vv.duration.toLong()
+                                val mp = mediaPlayerRef.value
+                                if (mp != null && mp.isPlaying) {
+                                    mediaPosition = mp.currentPosition.toLong()
+                                    mediaDuration = mp.duration.toLong()
                                 }
                                 delay(250)
                             }
                         }
                     }
 
-                    LaunchedEffect(pageItem.id, videoDuration, videoPosition, isVideoPlaying, videoReady) {
+                    LaunchedEffect(pageItem.id, mediaDuration, mediaPosition, isPlaying, isReady) {
                         if (isCurrentPage) {
-                            videoController.position = videoPosition
-                            videoController.duration = videoDuration
-                            videoController.isPlaying = isVideoPlaying
-                            videoController.isReady = videoReady
+                            videoController.position = mediaPosition
+                            videoController.duration = mediaDuration
+                            videoController.isPlaying = isPlaying
+                            videoController.isReady = isReady
                             videoController.togglePlay = {
-                                val vv = videoViewRef.value
-                                if (vv != null) {
-                                    if (vv.isPlaying) { vv.pause() } else { vv.start() }
+                                val mp = mediaPlayerRef.value
+                                if (mp != null) {
+                                    if (mp.isPlaying) { mp.pause(); isPlaying = false }
+                                    else { mp.start(); isPlaying = true }
                                 }
                             }
-                            videoController.seek = { pos -> videoViewRef.value?.seekTo(pos) }
+                            videoController.seek = { pos -> mediaPlayerRef.value?.seekTo(pos) }
                         }
                     }
 
+                    Box(modifier = Modifier.fillMaxSize()) {
                         AndroidView(
                             factory = { context ->
-                                VideoView(context).apply {
-                                    setVideoURI(android.net.Uri.parse(pageItem.uri))
-                                    setOnPreparedListener { mp ->
-                                        mp.isLooping = true
-                                        videoDuration = mp.duration.toLong()
-                                        videoReady = true
-                                        if (isCurrentPage) {
-                                            start()
-                                            isVideoPlaying = true
+                                android.view.TextureView(context).apply {
+                                    surfaceTextureListener = object : android.view.TextureView.SurfaceTextureListener {
+                                        override fun onSurfaceTextureAvailable(surface: android.graphics.SurfaceTexture, w: Int, h: Int) {
+                                            val mp = MediaPlayer().apply {
+                                                setDataSource(context, android.net.Uri.parse(pageItem.uri))
+                                                setSurface(android.view.Surface(surface))
+                                                isLooping = true
+                                                prepareAsync()
+                                                setOnPreparedListener {
+                                                    mediaDuration = it.duration.toLong()
+                                                    isReady = true
+                                                    if (isCurrentPage) { it.start(); isPlaying = true }
+                                                }
+                                                setOnCompletionListener { isPlaying = false }
+                                            }
+                                            mediaPlayerRef.value = mp
                                         }
+                                        override fun onSurfaceTextureSizeChanged(st: android.graphics.SurfaceTexture, w: Int, h: Int) {}
+                                        override fun onSurfaceTextureDestroyed(st: android.graphics.SurfaceTexture): Boolean {
+                                            mediaPlayerRef.value?.apply {
+                                                if (isPlaying) stop()
+                                                release()
+                                            }
+                                            mediaPlayerRef.value = null
+                                            isReady = false
+                                            return true
+                                        }
+                                        override fun onSurfaceTextureUpdated(st: android.graphics.SurfaceTexture) {}
                                     }
-                                    setOnCompletionListener { isVideoPlaying = false }
-                                    videoViewRef.value = this
                                 }
                             },
-                            update = { view ->
-                                if (isCurrentPage && videoReady) {
-                                    view.start()
-                                    isVideoPlaying = true
-                                }
-                            },
+                            update = { },
                             modifier = Modifier.fillMaxSize()
                         )
 
-                        // Gesture overlay Box for Swipe down and Play/Pause control
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .pointerInput(pageItem.id) {
                                     detectVerticalDragGestures(
-                                        onDragStart = {
-                                            isDraggingDown = true
-                                        },
+                                        onDragStart = { isDraggingDown = true },
                                         onDragEnd = {
                                             if (isDraggingDown) {
-                                                if (dragOffsetY > 150f) {
-                                                    isExiting = true
-                                                } else {
+                                                if (dragOffsetY > 150f) isExiting = true
+                                                else {
                                                     scope.launch {
-                                                        androidx.compose.animation.core.animate(
-                                                            initialValue = dragOffsetY,
-                                                            targetValue = 0f
-                                                        ) { value, _ ->
-                                                            dragOffsetY = value
-                                                        }
+                                                        androidx.compose.animation.core.animate(initialValue = dragOffsetY, targetValue = 0f) { value, _ -> dragOffsetY = value }
                                                     }
                                                 }
                                                 isDraggingDown = false
@@ -445,23 +444,14 @@ fun MediaDetailView(
                                         },
                                         onDragCancel = {
                                             if (isDraggingDown) {
-                                                scope.launch {
-                                                    androidx.compose.animation.core.animate(
-                                                        initialValue = dragOffsetY,
-                                                        targetValue = 0f
-                                                    ) { value, _ ->
-                                                        dragOffsetY = value
-                                                    }
-                                                }
+                                                scope.launch { androidx.compose.animation.core.animate(initialValue = dragOffsetY, targetValue = 0f) { value, _ -> dragOffsetY = value } }
                                                 isDraggingDown = false
                                             }
                                         },
                                         onVerticalDrag = { change, dragAmount ->
                                             if (isDraggingDown) {
                                                 dragOffsetY = (dragOffsetY + dragAmount).coerceAtLeast(0f)
-                                                if (dragOffsetY > 0f) {
-                                                    change.consume()
-                                                }
+                                                if (dragOffsetY > 0f) change.consume()
                                             }
                                         }
                                     )
@@ -478,27 +468,27 @@ fun MediaDetailView(
                         )
 
                         AnimatedVisibility(
-                            visible = !isVideoPlaying && videoReady,
-                            enter = fadeIn(),
-                            exit = fadeOut(),
+                            visible = !isPlaying && isReady,
+                            enter = fadeIn(), exit = fadeOut(),
                             modifier = Modifier.align(Alignment.Center)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(64.dp)
+                                    .size(72.dp)
                                     .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.15f))
-                                    .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape),
+                                    .background(Color.White.copy(alpha = 0.2f))
+                                    .border(2.dp, Color.White.copy(alpha = 0.3f), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.PlayArrow,
                                     contentDescription = "Reproducir",
                                     tint = Color.White,
-                                    modifier = Modifier.size(36.dp)
+                                    modifier = Modifier.size(40.dp)
                                 )
                             }
                         }
+                    }
                 } else {
                     // Interactive Zoomable image (Pan & Scale)
                     var scale by remember(pageItem.id) { mutableStateOf(1f) }
@@ -1105,11 +1095,17 @@ fun MediaDetailView(
             }
         }
 
-        // --- 4. VIDEO CONTROLS (glass floating bar for video playback) ---
+        // --- 4. VIDEO CONTROLS (glass floating bar con seek animado) ---
+        var isDraggingSeek by remember { mutableStateOf(false) }
+        var dragFraction by remember { mutableStateOf(0f) }
+        val seekFraction = if (isDraggingSeek) dragFraction
+            else if (videoController.duration > 0) videoController.position.toFloat() / videoController.duration.toFloat()
+            else 0f
+
         AnimatedVisibility(
             visible = areControlsVisible && currentItem.isVideo && videoController.isReady,
             enter = slideInVertically(
-                animationSpec = spring(dampingRatio = 0.7f, stiffness = 350f),
+                animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f),
                 initialOffsetY = { it }
             ) + fadeIn(),
             exit = slideOutVertically(
@@ -1119,7 +1115,7 @@ fun MediaDetailView(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 16.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
                 .onGloballyPositioned { coords ->
                     if (coords.isAttached) {
                         videoControlsRect = coords.boundsInRoot()
@@ -1128,25 +1124,40 @@ fun MediaDetailView(
         ) {
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                cornerRadius = 20.dp,
-                borderAlpha = 0.9f,
-                backgroundAlpha = 0.95f
+                cornerRadius = 28.dp,
+                borderAlpha = 0.8f,
+                backgroundAlpha = 0.9f
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    // Barra de progreso de cristal con thumb animado
+                    val thumbScale by animateFloatAsState(
+                        targetValue = if (isDraggingSeek) 1.6f else 1f,
+                        animationSpec = spring(dampingRatio = 0.5f, stiffness = 400f),
+                        label = "thumbScale"
+                    )
                     Slider(
-                        value = if (videoController.duration > 0) videoController.position.toFloat() / videoController.duration.toFloat() else 0f,
-                        onValueChange = { fraction ->
-                            videoController.seek((fraction * videoController.duration).toInt())
+                        value = seekFraction,
+                        onValueChange = { f ->
+                            if (!isDraggingSeek) {
+                                isDraggingSeek = true
+                                dragFraction = if (videoController.duration > 0)
+                                    videoController.position.toFloat() / videoController.duration.toFloat() else 0f
+                            }
+                            dragFraction = f
+                        },
+                        onValueChangeFinished = {
+                            isDraggingSeek = false
+                            videoController.seek((dragFraction * videoController.duration).toInt())
                         },
                         colors = SliderDefaults.colors(
                             thumbColor = Color.White,
-                            activeTrackColor = Color.White.copy(alpha = 0.85f),
-                            inactiveTrackColor = Color.White.copy(alpha = 0.2f),
+                            activeTrackColor = Color.White.copy(alpha = 0.8f),
+                            inactiveTrackColor = Color.White.copy(alpha = 0.15f),
                             activeTickColor = Color.Transparent,
                             inactiveTickColor = Color.Transparent
                         ),
@@ -1159,32 +1170,42 @@ fun MediaDetailView(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = formatTime(videoController.position),
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 12.sp,
+                            text = formatTime(
+                                if (isDraggingSeek) (dragFraction * videoController.duration).toLong()
+                                else videoController.position
+                            ),
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Medium
                         )
 
+                        // Play/Pause con animación de escala
+                        val btnScale by animateFloatAsState(
+                            targetValue = if (isDraggingSeek) 0.8f else 1f,
+                            animationSpec = spring(dampingRatio = 0.5f, stiffness = 400f),
+                            label = "playBtnScale"
+                        )
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(40.dp)
+                                .graphicsLayer { scaleX = btnScale; scaleY = btnScale }
                                 .clip(CircleShape)
                                 .background(Color.White.copy(alpha = 0.15f))
-                                .clickable { videoController.togglePlay() },
+                                .clickable(enabled = !isDraggingSeek) { videoController.togglePlay() },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = if (videoController.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                 contentDescription = if (videoController.isPlaying) "Pausar" else "Reproducir",
                                 tint = Color.White,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                         }
 
                         Text(
                             text = formatTime(videoController.duration),
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Medium
                         )
                     }

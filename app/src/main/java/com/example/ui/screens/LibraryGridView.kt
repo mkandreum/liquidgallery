@@ -446,7 +446,7 @@ fun LibraryGridView(
                     }
                     Box(
                         modifier = Modifier
-                            .wrapContentSize()
+                            .height(48.dp)
                             .clip(RoundedCornerShape(24.dp))
                             .background(
                                 if (isSelectionMode) Color.White
@@ -458,7 +458,7 @@ fun LibraryGridView(
                                 RoundedCornerShape(24.dp)
                             )
                             .clickable { viewModel.toggleSelectionMode() }
-                            .padding(horizontal = 18.dp, vertical = 8.dp)
+                            .padding(horizontal = 40.dp, vertical = 0.dp)
                             .onGloballyPositioned { coords ->
                                 if (coords.isAttached) {
                                     onSelectBtnRectChanged(coords.boundsInRoot())
@@ -471,7 +471,7 @@ fun LibraryGridView(
                         Text(
                             if (isSelectionMode) "Cancelar" else "Seleccionar",
                             color = if (isSelectionMode) Color.Black else Color.White,
-                            fontSize = 14.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
