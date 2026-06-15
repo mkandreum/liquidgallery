@@ -77,6 +77,15 @@ import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.floor
 
+class VideoController {
+    var isPlaying by mutableStateOf(false)
+    var position by mutableLongStateOf(0L)
+    var duration by mutableLongStateOf(0L)
+    var isReady by mutableStateOf(false)
+    var togglePlay: () -> Unit = {}
+    var seek: (Int) -> Unit = {}
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun MediaDetailView(
@@ -246,14 +255,6 @@ fun MediaDetailView(
     var detailShareRect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var detailDeleteRect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
 
-    class VideoController {
-        var isPlaying by mutableStateOf(false)
-        var position by mutableLongStateOf(0L)
-        var duration by mutableLongStateOf(0L)
-        var isReady by mutableStateOf(false)
-        var togglePlay: () -> Unit = {}
-        var seek: (Int) -> Unit = {}
-    }
     val videoController = remember { VideoController() }
 
     fun formatTime(ms: Long): String {
@@ -392,7 +393,8 @@ fun MediaDetailView(
 
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
+                            .fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
                         AndroidView(
                             factory = { context ->
@@ -417,7 +419,10 @@ fun MediaDetailView(
                                     isVideoPlaying = true
                                 }
                             },
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .fillMaxSize(0.92f)
+                                .clip(RoundedCornerShape(24.dp))
+                                .border(1.5.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(24.dp))
                         )
 
                         // Gesture overlay Box for Swipe down and Play/Pause control
@@ -489,7 +494,9 @@ fun MediaDetailView(
                             Box(
                                 modifier = Modifier
                                     .size(64.dp)
-                                    .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.15f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -923,9 +930,17 @@ fun MediaDetailView(
                                 }
                             }
                     ) {
+                        val carouselThumbnailModel = remember(item) {
+                            if (item.isVideo) {
+                                val cachedFile = java.io.File(java.io.File(detailContext.cacheDir, "video_thumbnails"), "${item.id}.webp")
+                                if (cachedFile.exists()) cachedFile else android.net.Uri.parse(item.uri)
+                            } else {
+                                android.net.Uri.parse(item.uri)
+                            }
+                        }
                         AsyncImage(
                             model = ImageRequest.Builder(detailContext)
-                                .data(android.net.Uri.parse(item.uri))
+                                .data(carouselThumbnailModel)
                                 .size(120)
                                 .crossfade(true)
                                 .build(),
@@ -1123,8 +1138,8 @@ fun MediaDetailView(
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
                 cornerRadius = 20.dp,
-                borderAlpha = if (isShaderActive) 0f else 1f,
-                backgroundAlpha = if (isShaderActive) 0f else 1f
+                borderAlpha = 0.9f,
+                backgroundAlpha = 0.95f
             ) {
                 Column(
                     modifier = Modifier

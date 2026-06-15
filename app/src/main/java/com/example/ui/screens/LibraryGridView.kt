@@ -917,15 +917,62 @@ private fun GalleryGridItemCell(
                         videoThumbBitmap = cached
                     } else {
                         val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            val retriever = android.media.MediaMetadataRetriever()
-                            try {
-                                retriever.setDataSource(context, android.net.Uri.parse(item.uri))
-                                retriever.getFrameAtTime(0)
-                            } catch (e: Exception) {
-                                android.util.Log.e("GridCell", "video thumbnail failed: ${item.uri}", e)
-                                null
-                            } finally {
-                                retriever.release()
+                            val cacheDir = java.io.File(context.cacheDir, "video_thumbnails")
+                            if (!cacheDir.exists()) {
+                                cacheDir.mkdirs()
+                            }
+                            val cachedFile = java.io.File(cacheDir, "${item.id}.webp")
+                            if (cachedFile.exists()) {
+                                try {
+                                    android.graphics.BitmapFactory.decodeFile(cachedFile.absolutePath)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("GridCell", "Failed to decode cached WebP thumbnail: ${cachedFile.absolutePath}", e)
+                                    null
+                                }
+                            } else {
+                                val retriever = android.media.MediaMetadataRetriever()
+                                try {
+                                    retriever.setDataSource(context, android.net.Uri.parse(item.uri))
+                                    val frame = retriever.getFrameAtTime(0)
+                                    if (frame != null) {
+                                        val maxDim = 256
+                                        val w = frame.width
+                                        val h = frame.height
+                                        val scaled = if (w > maxDim || h > maxDim) {
+                                            val ratio = w.toFloat() / h.toFloat()
+                                            val (newW, newH) = if (ratio > 1f) {
+                                                Pair(maxDim, (maxDim / ratio).toInt())
+                                            } else {
+                                                Pair((maxDim * ratio).toInt(), maxDim)
+                                            }
+                                            android.graphics.Bitmap.createScaledBitmap(frame, newW, newH, true)
+                                        } else {
+                                            frame
+                                        }
+
+                                        var fos: java.io.FileOutputStream? = null
+                                        try {
+                                            fos = java.io.FileOutputStream(cachedFile)
+                                            scaled.compress(android.graphics.Bitmap.CompressFormat.WEBP_LOSSY, 75, fos)
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("GridCell", "Failed to save WebP to disk cache", e)
+                                        } finally {
+                                            fos?.close()
+                                        }
+
+                                        if (scaled != frame) {
+                                            frame.recycle()
+                                        }
+                                        scaled
+                                    } else {
+                                        null
+                                    }
+                                } catch (e: Exception) {
+                                    android.util.Log.e("GridCell", "video thumbnail failed: ${item.uri}", e)
+                                    null
+                                } finally {
+                                    retriever.release()
+                                }
                             }
                         }
                         if (bitmap != null) {
