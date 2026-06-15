@@ -60,6 +60,8 @@ import androidx.compose.ui.layout.boundsInRoot
 import java.text.SimpleDateFormat
 import java.util.*
 
+private val videoThumbnailCache = android.util.LruCache<String, android.graphics.Bitmap>(100)
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun LibraryGridView(
@@ -73,6 +75,7 @@ fun LibraryGridView(
     isSearchActive: Boolean = false
 ) {
     val items by viewModel.visibleMediaItems.collectAsStateWithLifecycle()
+    val isShaderActive = android.os.Build.VERSION.SDK_INT >= 33
     val reversedItems = remember(items) { items.reversed() }
     val gridMode by viewModel.gridMode.collectAsStateWithLifecycle()
     val isSelectionMode by viewModel.isSelectionModeActive.collectAsStateWithLifecycle()
@@ -113,7 +116,7 @@ fun LibraryGridView(
     val preloadContext = LocalContext.current
     LaunchedEffect(items) {
         if (items.isNotEmpty()) {
-            val loader = coil.ImageLoader(preloadContext)
+            val loader = coil.Coil.imageLoader(preloadContext)
             items.forEach { item ->
                 val preloadRequest = ImageRequest.Builder(preloadContext)
                     .data(item.uri)
@@ -440,8 +443,12 @@ fun LibraryGridView(
                                     }
                                 }
                                 .clip(CircleShape)
-                                .background(GlassBarFill)
-                                .border(1.dp, GlassBarBorder, CircleShape)
+                                .background(if (isShaderActive) Color.Transparent else GlassBarFill)
+                                .border(
+                                    1.dp,
+                                    if (isShaderActive) Color.Transparent else GlassBarBorder,
+                                    CircleShape
+                                )
                                 .clickable(onClick = onSearchClick),
                             contentAlignment = Alignment.Center
                         ) {
@@ -459,11 +466,11 @@ fun LibraryGridView(
                             .clip(RoundedCornerShape(20.dp))
                             .background(
                                 if (isSelectionMode) Color.White
-                                else GlassBarFill
+                                else if (isShaderActive) Color.Transparent else GlassBarFill
                             )
                             .border(
                                 1.dp,
-                                if (isSelectionMode) Color.Transparent else GlassBarBorder,
+                                if (isSelectionMode || isShaderActive) Color.Transparent else GlassBarBorder,
                                 RoundedCornerShape(20.dp)
                             )
                             .clickable { viewModel.toggleSelectionMode() }
@@ -899,24 +906,32 @@ private fun GalleryGridItemCell(
         val context = LocalContext.current
 
         if (item.isVideo) {
-            var videoThumbBitmap by remember(item.uri) { mutableStateOf<android.graphics.Bitmap?>(null) }
+            var videoThumbBitmap by remember(item.uri) {
+                mutableStateOf<android.graphics.Bitmap?>(videoThumbnailCache.get(item.uri))
+            }
 
             LaunchedEffect(item.uri) {
                 if (videoThumbBitmap == null) {
-                    val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        val retriever = android.media.MediaMetadataRetriever()
-                        try {
-                            retriever.setDataSource(context, android.net.Uri.parse(item.uri))
-                            retriever.getFrameAtTime(0)
-                        } catch (e: Exception) {
-                            android.util.Log.e("GridCell", "video thumbnail failed: ${item.uri}", e)
-                            null
-                        } finally {
-                            retriever.release()
+                    val cached = videoThumbnailCache.get(item.uri)
+                    if (cached != null) {
+                        videoThumbBitmap = cached
+                    } else {
+                        val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            val retriever = android.media.MediaMetadataRetriever()
+                            try {
+                                retriever.setDataSource(context, android.net.Uri.parse(item.uri))
+                                retriever.getFrameAtTime(0)
+                            } catch (e: Exception) {
+                                android.util.Log.e("GridCell", "video thumbnail failed: ${item.uri}", e)
+                                null
+                            } finally {
+                                retriever.release()
+                            }
                         }
-                    }
-                    if (bitmap != null) {
-                        videoThumbBitmap = bitmap
+                        if (bitmap != null) {
+                            videoThumbnailCache.put(item.uri, bitmap)
+                            videoThumbBitmap = bitmap
+                        }
                     }
                 }
             }

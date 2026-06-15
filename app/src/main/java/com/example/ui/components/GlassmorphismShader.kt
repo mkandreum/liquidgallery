@@ -32,14 +32,19 @@ val LIQUID_GLASS_SHADER = """
         float2 q = pos - (halfSize - r);
         float sdf = length(max(q, float2(0.0))) + min(max(q.x, q.y), 0.0) - r;
 
-        // If outside the rounded pill boundary, return background as-is (keeps perfect pill shape)
-        if (sdf > 0.0) return baseColor;
+        // Expand the boundary check to 1.5 pixels to cover anti-aliased Compose borders
+        if (sdf > 1.5) return baseColor;
 
-        // 2. Calculate edge factor (0 at center, 1 at edge) and surface normal
-        float edgeFactor = clamp(1.0 + sdf / r, 0.0, 1.0);
+        // Calculate a smooth edge alpha (1.0 inside, fading to 0.0 at 1.5px outside)
+        float edgeAlpha = 1.0 - smoothstep(0.0, 1.5, sdf);
 
-        // Wider curvature profile — "ángulo más abierto"
-        float edgeDepth = pow(edgeFactor, 0.85);
+        // 2. Define responsive bevel boundary (20px width) and calculate normalized distance inside it
+        float w = min(r * 0.85, 20.0);
+        float d = -sdf; // distance from edge (positive inside)
+        float u = clamp(d / w, 0.0, 1.0); // 0.0 at outer edge, 1.0 at flat center
+
+        // Curvature profile that goes to 0.0 at the flat center (u = 1.0)
+        float normalTilt = pow(1.0 - u, 1.5);
 
         // 3. Surface normal pointing outward from the pill boundary
         float2 capCenterOffset = float2(max(0.0, halfSize.x - r), 0.0);
@@ -55,13 +60,23 @@ val LIQUID_GLASS_SHADER = """
             dir = float2(0.0, localCapCoord.y >= 0.0 ? 1.0 : -1.0);
         }
 
-        // 4. Refraction displacement — subtle glass-lens warp
-        float2 distortedCoord = coord + dir * (14.0 * edgeDepth);
+        // Compute 3D surface normal: curves at the 20px bevel, flat N = (0,0,1) in the center
+        float3 N = normalize(float3(dir * normalTilt * 2.5, 1.0));
 
-        // 5. Chromatic aberration: split RGB radially
-        float chromaStrength = 5.0 * pow(edgeFactor, 0.9);
-        float2 rCoord = distortedCoord + dir * chromaStrength;
-        float2 bCoord = distortedCoord - dir * chromaStrength * 0.75;
+        // 4. Snell's Law Refraction displacement (Inward direction for magnifying glass/lupa)
+        float eta = 0.55; // High refractive index for magnifying bevel
+        float k = 1.0 - eta * eta * (1.0 - N.z * N.z);
+        float refractScale = sqrt(k) - eta * N.z;
+        
+        // Disable distortion completely outside the pill to keep edges perfectly clean
+        float edgeDistortionScale = clamp(1.0 - sdf, 0.0, 1.0);
+        float2 distortion = -dir * (refractScale * normalTilt * (r * 0.8) * edgeDistortionScale);
+        
+        float2 distortedCoord = coord + distortion;
+
+        // 5. Chromatic aberration: split RGB slightly (reduced aberration)
+        float2 rCoord = coord + distortion * 1.08;
+        float2 bCoord = coord + distortion * 0.93;
 
         // 6. Blur and sample each channel
         float blurOff = 2.0;
@@ -98,46 +113,50 @@ val LIQUID_GLASS_SHADER = """
         ) * 0.2;
         color.a = 1.0;
 
+        // Apply a base dark glass tint across the entire card
+        half3 baseFill = half3(0.08, 0.08, 0.08); // matches GlassBarFill (0x141414)
+        color.rgb = mix(color.rgb, baseFill, 0.266);
+
         // 7. 3D curved glass shading
-        // Light from upper-left: surfaces facing upper-left catch the light
-        float lightDot = dir.x * 0.707 + dir.y * 0.707; // -1 (shadow) to 1 (lit)
+        // Light direction from top-left, slightly forward
+        float3 L = normalize(float3(-1.0, -1.0, 1.8));
+        float dotNL = clamp(dot(N, L), 0.0, 1.0);
+        
+        // Single clean outer highlight (no double reflection lines)
+        float outerHighlight = pow(1.0 - u, 10.0) * 0.65 * (0.4 + 0.6 * dotNL);
+        
+        // Edge shadow: dark contour ring simulating thickness & total internal reflection
+        float edgeShadow = 1.0 - pow(1.0 - u, 6.0) * 0.45 * (1.0 - 0.4 * dotNL);
+        
+        color.rgb *= edgeShadow;
+        color.rgb += half3(outerHighlight * 0.9, outerHighlight * 0.95, outerHighlight);
 
-        // Edge shadow — simulates glass thickness curving away from light
-        float shadow = 1.0 - edgeDepth * 0.28 * clamp(1.0 - lightDot, 0.0, 1.0);
-        color.rgb *= shadow;
+        // 8. Cool glass tint fading to interior
+        half3 glassTint = half3(0.92, 0.96, 1.0);
+        color.rgb = mix(color.rgb, glassTint, 0.07 * (1.0 - u));
 
-        // Rim light — glass edge catching light on the lit side
-        float rimLight = edgeDepth * 0.18 * clamp(lightDot, 0.0, 1.0);
-        color.rgb += half3(rimLight * 0.92, rimLight * 0.96, rimLight);
-
-        // Specular reflection band — bright highlight at the curvature peak
-        float specular = pow(edgeDepth, 3.0) * 0.35 * pow(clamp(lightDot, 0.0, 1.0), 3.0);
-        color.rgb += half3(specular * 0.85, specular * 0.92, specular);
-
-        // 8. Blue-white glass tint fading to edges
-        half3 glassTint = half3(0.92, 0.95, 1.0);
-        color.rgb = mix(color.rgb, glassTint, 0.06 * edgeFactor);
-
-        return color;
+        // 9. Smoothly blend the glass overlay with the background at the outer edge
+        return mix(baseColor, color, edgeAlpha);
     }
 
     half4 main(float2 fragCoord) {
         half4 baseColor = image.eval(fragCoord);
 
-        bool inDensityBar = (fragCoord.x >= densityBarRect.x && fragCoord.x <= densityBarRect.z &&
-                             fragCoord.y >= densityBarRect.y && fragCoord.y <= densityBarRect.w);
+        // Expand bounds by 2.0 pixels to cover anti-aliased Compose borders
+        bool inDensityBar = (fragCoord.x >= densityBarRect.x - 2.0 && fragCoord.x <= densityBarRect.z + 2.0 &&
+                             fragCoord.y >= densityBarRect.y - 2.0 && fragCoord.y <= densityBarRect.w + 2.0);
 
-        bool inMainBar = (fragCoord.x >= barRect.x && fragCoord.x <= barRect.z &&
-                          fragCoord.y >= barRect.y && fragCoord.y <= barRect.w);
+        bool inMainBar = (fragCoord.x >= barRect.x - 2.0 && fragCoord.x <= barRect.z + 2.0 &&
+                          fragCoord.y >= barRect.y - 2.0 && fragCoord.y <= barRect.w + 2.0);
 
-        bool inSearchBar = (fragCoord.x >= searchBarRect.x && fragCoord.x <= searchBarRect.z &&
-                            fragCoord.y >= searchBarRect.y && fragCoord.y <= searchBarRect.w);
+        bool inSearchBar = (fragCoord.x >= searchBarRect.x - 2.0 && fragCoord.x <= searchBarRect.z + 2.0 &&
+                            fragCoord.y >= searchBarRect.y - 2.0 && fragCoord.y <= searchBarRect.w + 2.0);
 
-        bool inSearchFab = (fragCoord.x >= searchFabRect.x && fragCoord.x <= searchFabRect.z &&
-                            fragCoord.y >= searchFabRect.y && fragCoord.y <= searchFabRect.w);
+        bool inSearchFab = (fragCoord.x >= searchFabRect.x - 2.0 && fragCoord.x <= searchFabRect.z + 2.0 &&
+                            fragCoord.y >= searchFabRect.y - 2.0 && fragCoord.y <= searchFabRect.w + 2.0);
 
-        bool inPageIndicator = (fragCoord.x >= pageIndicatorRect.x && fragCoord.x <= pageIndicatorRect.z &&
-                                fragCoord.y >= pageIndicatorRect.y && fragCoord.y <= pageIndicatorRect.w);
+        bool inPageIndicator = (fragCoord.x >= pageIndicatorRect.x - 2.0 && fragCoord.x <= pageIndicatorRect.z + 2.0 &&
+                                fragCoord.y >= pageIndicatorRect.y - 2.0 && fragCoord.y <= pageIndicatorRect.w + 2.0);
 
         if (inDensityBar) {
             return applyGlassEffect(fragCoord, densityBarRect, baseColor);
@@ -155,14 +174,14 @@ val LIQUID_GLASS_SHADER = """
             return applyGlassEffect(fragCoord, pageIndicatorRect, baseColor);
         }
 
-        bool inSelectBtn = (fragCoord.x >= selectBtnRect.x && fragCoord.x <= selectBtnRect.z &&
-                            fragCoord.y >= selectBtnRect.y && fragCoord.y <= selectBtnRect.w);
+        bool inSelectBtn = (fragCoord.x >= selectBtnRect.x - 2.0 && fragCoord.x <= selectBtnRect.z + 2.0 &&
+                            fragCoord.y >= selectBtnRect.y - 2.0 && fragCoord.y <= selectBtnRect.w + 2.0);
         if (inSelectBtn) {
             return applyGlassEffect(fragCoord, selectBtnRect, baseColor);
         }
 
-        bool inCollapsedFab = (fragCoord.x >= collapsedFabRect.x && fragCoord.x <= collapsedFabRect.z &&
-                               fragCoord.y >= collapsedFabRect.y && fragCoord.y <= collapsedFabRect.w);
+        bool inCollapsedFab = (fragCoord.x >= collapsedFabRect.x - 2.0 && fragCoord.x <= collapsedFabRect.z + 2.0 &&
+                               fragCoord.y >= collapsedFabRect.y - 2.0 && fragCoord.y <= collapsedFabRect.w + 2.0);
         if (inCollapsedFab) {
             return applyGlassEffect(fragCoord, collapsedFabRect, baseColor);
         }

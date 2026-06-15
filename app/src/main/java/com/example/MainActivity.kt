@@ -96,6 +96,7 @@ fun MainGalleryScreen(viewModel: GalleryViewModel) {
     val activeDetailItem by viewModel.activeDetailItem.collectAsStateWithLifecycle()
     val currentTab by viewModel.currentTab.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val isShaderActive = android.os.Build.VERSION.SDK_INT >= 33
 
     // Coordinated bottom bars scroll states
     var isLibraryScrolling by remember { mutableStateOf(false) }
@@ -226,9 +227,9 @@ fun MainGalleryScreen(viewModel: GalleryViewModel) {
                         .liquidGlassBackdrop(
                             mainBarRect = { mainBarRect },
                             densityBarRect = { densityBarRect },
-                            searchBarRect = { androidx.compose.ui.geometry.Rect.Zero },
-                            searchFabRect = { androidx.compose.ui.geometry.Rect.Zero },
-                            selectBtnRect = { androidx.compose.ui.geometry.Rect.Zero },
+                            searchBarRect = { searchBarRect },
+                            searchFabRect = { searchFabRect },
+                            selectBtnRect = { selectBtnRect },
                             collapsedFabRect = { collapsedFabRect }
                         )
                 ) {
@@ -310,8 +311,12 @@ fun MainGalleryScreen(viewModel: GalleryViewModel) {
                                     }
                                 }
                                 .clip(RoundedCornerShape(NavBarCornerRadius))
-                                .background(GlassBarFill)
-                                .border(1.dp, GlassBarBorder, RoundedCornerShape(NavBarCornerRadius))
+                                .background(if (isShaderActive) Color.Transparent else GlassBarFill)
+                                .border(
+                                    1.dp,
+                                    if (isShaderActive) Color.Transparent else GlassBarBorder,
+                                    RoundedCornerShape(NavBarCornerRadius)
+                                )
                         ) {
                             val segmentWidth = maxWidth / densityModes.size
                             val densityIndicatorOffset by animateDpAsState(
@@ -362,8 +367,8 @@ fun MainGalleryScreen(viewModel: GalleryViewModel) {
                                     }
                                 }
                                 .clip(CircleShape)
-                                .background(GlassBarFill)
-                                .border(1.dp, GlassBarBorder, CircleShape)
+                                .background(if (isShaderActive) Color.Transparent else GlassBarFill)
+                                .border(1.dp, if (isShaderActive) Color.Transparent else GlassBarBorder, CircleShape)
                                 .clickable {
                                     showMainBar = true
                                     densityBarVisible = false
@@ -413,8 +418,12 @@ fun MainGalleryScreen(viewModel: GalleryViewModel) {
                                 }
                             }
                             .clip(RoundedCornerShape(NavBarCornerRadius))
-                            .background(GlassBarFill)
-                            .border(1.dp, GlassBarBorder, RoundedCornerShape(NavBarCornerRadius))
+                            .background(if (isShaderActive) Color.Transparent else GlassBarFill)
+                            .border(
+                                1.dp,
+                                if (isShaderActive) Color.Transparent else GlassBarBorder,
+                                RoundedCornerShape(NavBarCornerRadius)
+                            )
                     ) {
                         val tabWidth = maxWidth / 2
                         val isFototeca = currentTab == "Fototeca"
@@ -550,7 +559,9 @@ fun MainGalleryScreen(viewModel: GalleryViewModel) {
                                     searchBarRect = androidx.compose.ui.geometry.Rect.Zero
                                 }
                             },
-                        cornerRadius = 28.dp
+                        cornerRadius = 28.dp,
+                        borderAlpha = if (isShaderActive) 0f else 1f,
+                        backgroundAlpha = if (isShaderActive) 0f else 1f
                     ) {
                         DisposableEffect(Unit) {
                             onDispose {

@@ -71,7 +71,8 @@ fun CollectionsView(
 
     if (showBiometricDialog) {
         val context = LocalContext.current
-        LaunchedEffect(showBiometricDialog) {
+        DisposableEffect(Unit) {
+            val cancellationSignal = android.os.CancellationSignal()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 val executor = context.mainExecutor
                 val biometricPrompt = BiometricPrompt.Builder(context)
@@ -80,7 +81,7 @@ fun CollectionsView(
                     .setNegativeButton("Cancelar", executor) { _, _ -> showBiometricDialog = false }
                     .build()
                 biometricPrompt.authenticate(
-                    android.os.CancellationSignal(), executor,
+                    cancellationSignal, executor,
                     object : BiometricPrompt.AuthenticationCallback() {
                         override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                             showBiometricDialog = false
@@ -97,6 +98,9 @@ fun CollectionsView(
                 showBiometricDialog = false
                 selectedSubAlbumName = "Ocultos"
                 selectedSubAlbumItems = hiddenItems
+            }
+            onDispose {
+                cancellationSignal.cancel()
             }
         }
     }

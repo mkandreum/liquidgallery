@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -95,16 +96,15 @@ class GalleryViewModel(
     val rawMediaItems: StateFlow<List<MediaItem>> = repository.getMediaFlow()
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Lazily,
             initialValue = emptyList()
         )
 
     // Filtered media items to show in grid (respect searchQuery & exclude hidden items unless checking hidden album)
     val visibleMediaItems: StateFlow<List<MediaItem>> = combine(
         rawMediaItems,
-        _searchQuery,
-        _currentTab
-    ) { items, query, tab ->
+        _searchQuery
+    ) { items, query ->
         var filtered = items.filter { !it.isHidden }
         if (query.isNotEmpty()) {
             filtered = filtered.filter {
@@ -117,7 +117,7 @@ class GalleryViewModel(
     .flowOn(Dispatchers.Default)
     .stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
+        started = SharingStarted.Lazily,
         initialValue = emptyList()
     )
 
@@ -131,29 +131,29 @@ class GalleryViewModel(
         override ?: default
     }.stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
+        started = SharingStarted.Lazily,
         initialValue = emptyList()
     )
 
     // Exposed lists of custom groupings for the "Colecciones" screen:
     val favoriteItems: StateFlow<List<MediaItem>> = rawMediaItems
-        .combine(MutableStateFlow(true)) { items, _ ->
+        .map { items ->
             items.filter { it.isFavorite && !it.isHidden }
         }
         .flowOn(Dispatchers.Default)
-        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+        .stateIn(scope = viewModelScope, started = SharingStarted.Lazily, initialValue = emptyList())
 
     // Hidden Items (the secure Hidden Album)
     val hiddenItems: StateFlow<List<MediaItem>> = rawMediaItems
-        .combine(MutableStateFlow(true)) { items, _ ->
+        .map { items ->
             items.filter { it.isHidden }
         }
         .flowOn(Dispatchers.Default)
-        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+        .stateIn(scope = viewModelScope, started = SharingStarted.Lazily, initialValue = emptyList())
 
     // Memory cards list grouped dynamically
     val memoryCollections: StateFlow<List<MemoryGroup>> = rawMediaItems
-        .combine(MutableStateFlow(true)) { items, _ ->
+        .map { items ->
             // Group items representing locations, like "Peñíscola", "Albacete", "Madrid"
             val valid = items.filter { !it.isHidden && !it.location.isNullOrEmpty() }
             valid.groupBy { it.location }.map { (location, list) ->
@@ -171,38 +171,38 @@ class GalleryViewModel(
             }.sortedBy { it.location }
         }
         .flowOn(Dispatchers.Default)
-        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+        .stateIn(scope = viewModelScope, started = SharingStarted.Lazily, initialValue = emptyList())
 
     // Custom Albums compiled from database custom album field
     val customAlbums: StateFlow<Map<String, List<MediaItem>>> = rawMediaItems
-        .combine(MutableStateFlow(true)) { items, _ ->
+        .map { items ->
             items.filter { !it.customAlbum.isNullOrBlank() }
                 .groupBy { it.customAlbum!! }
         }
         .flowOn(Dispatchers.Default)
-        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyMap())
+        .stateIn(scope = viewModelScope, started = SharingStarted.Lazily, initialValue = emptyMap())
 
     val groupedYears: StateFlow<List<YearSection>> = rawMediaItems
-        .combine(MutableStateFlow(true)) { items, _ ->
+        .map { items ->
             items.filter { !it.isHidden }
                 .groupBy { extractYear(it.dateAdded) }
                 .map { (y, list) -> YearSection(y, list) }
                 .sortedByDescending { it.year }
         }
         .flowOn(Dispatchers.Default)
-        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+        .stateIn(scope = viewModelScope, started = SharingStarted.Lazily, initialValue = emptyList())
 
     val groupedMonths: StateFlow<List<MonthSection>> = rawMediaItems
-        .combine(MutableStateFlow(true)) { items, _ ->
+        .map { items ->
             items.filter { !it.isHidden }
                 .groupBy { extractMonthYearLabel(it.dateAdded) }
                 .map { (m, list) -> MonthSection(m, list) }
                 .sortedByDescending { it.items.firstOrNull()?.dateAdded ?: 0L }
         }
         .flowOn(Dispatchers.Default)
-        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+        .stateIn(scope = viewModelScope, started = SharingStarted.Lazily, initialValue = emptyList())
 
-    val drilledDownMonths: StateFlow<List<MonthSection>> = combine(rawMediaItems, _selectedYear, MutableStateFlow(true)) { items, year, _ ->
+    val drilledDownMonths: StateFlow<List<MonthSection>> = combine(rawMediaItems, _selectedYear) { items, year ->
         val filtered = if (year != null) {
             items.filter { !it.isHidden && extractYear(it.dateAdded) == year }
         } else {
@@ -213,7 +213,7 @@ class GalleryViewModel(
             .sortedByDescending { it.items.firstOrNull()?.dateAdded ?: 0L }
     }
     .flowOn(Dispatchers.Default)
-    .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+    .stateIn(scope = viewModelScope, started = SharingStarted.Lazily, initialValue = emptyList())
 
     fun selectTab(tab: String) {
         _currentTab.value = tab
@@ -329,6 +329,21 @@ class GalleryViewModel(
                 )
             }
             Toast.makeText(getApplication(), "Datos actualizados", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun saveImageAdjustments(item: MediaItem, rotation: Float, brightness: Float, contrast: Float, saturation: Float) {
+        viewModelScope.launch {
+            repository.updateAdjustments(item.id, rotation, brightness, contrast, saturation)
+            if (_activeDetailItem.value?.id == item.id) {
+                _activeDetailItem.value = _activeDetailItem.value?.copy(
+                    rotation = rotation,
+                    brightness = brightness,
+                    contrast = contrast,
+                    saturation = saturation
+                )
+            }
+            Toast.makeText(getApplication(), "Ajustes de imagen guardados", Toast.LENGTH_SHORT).show()
         }
     }
 

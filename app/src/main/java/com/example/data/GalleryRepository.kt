@@ -24,8 +24,35 @@ class GalleryRepository(
     private val mediaOverrideDao: MediaOverrideDao,
     private val cachedMediaDao: CachedMediaDao
 ) {
+    private fun hasReadPermission(): Boolean {
+        val hasImages = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.READ_MEDIA_IMAGES
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        val hasVideos = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.READ_MEDIA_VIDEO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        val hasPartial = if (android.os.Build.VERSION.SDK_INT >= 34) {
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+            false
+        }
+
+        return hasImages || hasVideos || hasPartial
+    }
+
     @Suppress("DEPRECATION")
-    private fun fetchDeviceMedia(): List<MediaItem> {
+    private fun fetchDeviceMedia(): List<MediaItem>? {
+        if (!hasReadPermission()) {
+            Log.w("GalleryRepo", "Sync bypassed: Read media permissions are not granted yet.")
+            return null
+        }
         val items = mutableListOf<MediaItem>()
 
         val imageUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
@@ -163,22 +190,30 @@ class GalleryRepository(
                         trySend(Unit)
                     }
                 }
-                context.contentResolver.registerContentObserver(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer
-                )
-                context.contentResolver.registerContentObserver(
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer
-                )
+                try {
+                    context.contentResolver.registerContentObserver(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer
+                    )
+                    context.contentResolver.registerContentObserver(
+                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer
+                    )
+                } catch (e: SecurityException) {
+                    Log.e("GalleryRepo", "SecurityException registering content observers", e)
+                }
                 trySend(Unit)
                 awaitClose {
-                    context.contentResolver.unregisterContentObserver(observer)
+                    try {
+                        context.contentResolver.unregisterContentObserver(observer)
+                    } catch (e: Exception) {
+                        // ignore
+                    }
                 }
             }
             contentFlow
                 .debounce(100L)
                 .collect {
                     try {
-                        val deviceMedia = fetchDeviceMedia()
+                        val deviceMedia = fetchDeviceMedia() ?: return@collect
                         val cached = deviceMedia.map {
                             CachedMediaItem(
                                 id = it.id,
@@ -222,7 +257,11 @@ class GalleryRepository(
                         isVideo = dbItem.isVideo,
                         isFavorite = override?.isFavorite ?: false,
                         isHidden = override?.isHidden ?: false,
-                        customAlbum = override?.customAlbum
+                        customAlbum = override?.customAlbum,
+                        rotation = override?.rotation ?: 0f,
+                        brightness = override?.brightness ?: 0f,
+                        contrast = override?.contrast ?: 1f,
+                        saturation = override?.saturation ?: 1f
                     )
                 )
             }
@@ -248,7 +287,11 @@ class GalleryRepository(
                                 isVideo = baseItem.isVideo,
                                 isFavorite = override.isFavorite,
                                 isHidden = override.isHidden,
-                                customAlbum = override.customAlbum
+                                customAlbum = override.customAlbum,
+                                rotation = override.rotation,
+                                brightness = override.brightness,
+                                contrast = override.contrast,
+                                saturation = override.saturation
                             )
                         )
                     }
@@ -257,6 +300,25 @@ class GalleryRepository(
 
             mergedList.distinctBy { it.id }.sortedByDescending { it.dateAdded }
         }.flowOn(Dispatchers.Default)
+    }
+
+    suspend fun updateAdjustments(
+        mediaId: String, rotation: Float, brightness: Float, contrast: Float, saturation: Float
+    ) = withContext(Dispatchers.IO) {
+        val existing = mediaOverrideDao.getOverrideById(mediaId)
+        val updated = existing?.copy(
+            rotation = rotation,
+            brightness = brightness,
+            contrast = contrast,
+            saturation = saturation
+        ) ?: MediaOverride(
+            mediaId = mediaId,
+            rotation = rotation,
+            brightness = brightness,
+            contrast = contrast,
+            saturation = saturation
+        )
+        mediaOverrideDao.insertOverride(updated)
     }
 
     suspend fun toggleFavorite(mediaId: String, currentFavorite: Boolean) = withContext(Dispatchers.IO) {

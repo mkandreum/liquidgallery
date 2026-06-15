@@ -14,6 +14,16 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroidSize
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculateRotation
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -22,6 +32,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.input.pointer.positionChanged
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Info
@@ -194,7 +206,7 @@ fun MediaDetailView(
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val detailSnackbarHostState = remember { SnackbarHostState() }
-    val detailSnackbarScope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
 
     // Generate native ColorMatrix for filters dynamically
     val colorMatrixState = remember(brightness, contrast, saturation) {
@@ -229,6 +241,10 @@ fun MediaDetailView(
     var detailBackButtonRect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var detailOptionsButtonRect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var videoControlsRect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    val isShaderActive = android.os.Build.VERSION.SDK_INT >= 33
+    var isZoomed by remember { mutableStateOf(false) }
+    var detailShareRect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var detailDeleteRect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
 
     class VideoController {
         var isPlaying by mutableStateOf(false)
@@ -268,6 +284,8 @@ fun MediaDetailView(
                     densityBarRect = { if (areControlsVisible) detailLocationRect else androidx.compose.ui.geometry.Rect.Zero },
                     searchBarRect = { if (areControlsVisible) detailBackButtonRect else androidx.compose.ui.geometry.Rect.Zero },
                     searchFabRect = { if (areControlsVisible) detailOptionsButtonRect else androidx.compose.ui.geometry.Rect.Zero },
+                    selectBtnRect = { if (areControlsVisible) detailShareRect else androidx.compose.ui.geometry.Rect.Zero },
+                    collapsedFabRect = { if (areControlsVisible) detailDeleteRect else androidx.compose.ui.geometry.Rect.Zero },
                     pageIndicatorRect = { if (areControlsVisible && currentItem.isVideo) videoControlsRect else androidx.compose.ui.geometry.Rect.Zero }
                 )
         ) {
@@ -276,7 +294,7 @@ fun MediaDetailView(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black),
-                userScrollEnabled = true,
+                userScrollEnabled = !isZoomed,
                 beyondViewportPageCount = 1,
                 key = { allItems.getOrNull(it)?.id ?: it }
             ) { pageIndex ->
@@ -299,6 +317,30 @@ fun MediaDetailView(
                     var videoDuration by remember(pageItem.id) { mutableLongStateOf(0L) }
                     var videoReady by remember(pageItem.id) { mutableStateOf(false) }
                     val videoViewRef = remember { mutableStateOf<VideoView?>(null) }
+
+                    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+                    DisposableEffect(lifecycleOwner, pageItem.id, isCurrentPage) {
+                        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                            val vv = videoViewRef.value
+                            if (vv != null && isCurrentPage && videoReady) {
+                                when (event) {
+                                    androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> {
+                                        vv.pause()
+                                        isVideoPlaying = false
+                                    }
+                                    androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                                        vv.start()
+                                        isVideoPlaying = true
+                                    }
+                                    else -> {}
+                                }
+                            }
+                        }
+                        lifecycleOwner.lifecycle.addObserver(observer)
+                        onDispose {
+                            lifecycleOwner.lifecycle.removeObserver(observer)
+                        }
+                    }
 
                     DisposableEffect(pageItem.id) {
                         onDispose {
@@ -375,8 +417,58 @@ fun MediaDetailView(
                                     isVideoPlaying = true
                                 }
                             },
+                            modifier = Modifier.fillMaxSize()
+                        )
+
+                        // Gesture overlay Box for Swipe down and Play/Pause control
+                        Box(
                             modifier = Modifier
                                 .fillMaxSize()
+                                .pointerInput(pageItem.id) {
+                                    detectVerticalDragGestures(
+                                        onDragStart = {
+                                            isDraggingDown = true
+                                        },
+                                        onDragEnd = {
+                                            if (isDraggingDown) {
+                                                if (dragOffsetY > 150f) {
+                                                    isExiting = true
+                                                } else {
+                                                    scope.launch {
+                                                        androidx.compose.animation.core.animate(
+                                                            initialValue = dragOffsetY,
+                                                            targetValue = 0f
+                                                        ) { value, _ ->
+                                                            dragOffsetY = value
+                                                        }
+                                                    }
+                                                }
+                                                isDraggingDown = false
+                                            }
+                                        },
+                                        onDragCancel = {
+                                            if (isDraggingDown) {
+                                                scope.launch {
+                                                    androidx.compose.animation.core.animate(
+                                                        initialValue = dragOffsetY,
+                                                        targetValue = 0f
+                                                    ) { value, _ ->
+                                                        dragOffsetY = value
+                                                    }
+                                                }
+                                                isDraggingDown = false
+                                            }
+                                        },
+                                        onVerticalDrag = { change, dragAmount ->
+                                            if (isDraggingDown) {
+                                                dragOffsetY = (dragOffsetY + dragAmount).coerceAtLeast(0f)
+                                                if (dragOffsetY > 0f) {
+                                                    change.consume()
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
                                 .pointerInput(pageItem.id) {
                                     detectTapGestures(
                                         onTap = {
@@ -434,22 +526,77 @@ fun MediaDetailView(
                         scale = 1f
                         offset = Offset.Zero
                     }
+                    LaunchedEffect(scale) {
+                        isZoomed = scale > 1f
+                    }
 
                     // Conditional modifier: only intercept gestures when zoomed in
                     val zoomEnabled = scale > 1f
 
-                    Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clipToBounds()
+                            .pointerInput(pageItem.id, scale) {
+                                detectVerticalDragGestures(
+                                    onDragStart = {
+                                        if (scale == 1f) {
+                                            isDraggingDown = true
+                                        }
+                                    },
+                                    onDragEnd = {
+                                        if (isDraggingDown) {
+                                            if (dragOffsetY > 150f) {
+                                                isExiting = true
+                                            } else {
+                                                scope.launch {
+                                                    androidx.compose.animation.core.animate(
+                                                        initialValue = dragOffsetY,
+                                                        targetValue = 0f
+                                                    ) { value, _ ->
+                                                        dragOffsetY = value
+                                                    }
+                                                }
+                                            }
+                                            isDraggingDown = false
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        if (isDraggingDown) {
+                                            scope.launch {
+                                                androidx.compose.animation.core.animate(
+                                                    initialValue = dragOffsetY,
+                                                    targetValue = 0f
+                                                ) { value, _ ->
+                                                    dragOffsetY = value
+                                                }
+                                            }
+                                            isDraggingDown = false
+                                        }
+                                    },
+                                    onVerticalDrag = { change, dragAmount ->
+                                        if (isDraggingDown) {
+                                            dragOffsetY = (dragOffsetY + dragAmount).coerceAtLeast(0f)
+                                            if (dragOffsetY > 0f) {
+                                                change.consume()
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                    ) {
                         val detailUri = remember(pageItem.uri) { android.net.Uri.parse(pageItem.uri) }
                         val thumbnailRequest = remember(pageItem.uri) {
                             ImageRequest.Builder(detailContext)
                                 .data(detailUri)
-                                .size(512)
+                                .size(300)
                                 .crossfade(true)
                                 .build()
                         }
                         val imageRequest = remember(pageItem.uri) {
                             ImageRequest.Builder(detailContext)
                                 .data(detailUri)
+                                .size(2048)
                                 .crossfade(300)
                                 .allowRgb565(false)
                                 .build()
@@ -458,20 +605,24 @@ fun MediaDetailView(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .pointerInput(pageItem.id) {
-                                    detectTransformGestures { _, pan, zoom, _ ->
-                                        val newScale = (scale * zoom).coerceIn(1f, 4f)
-                                        scale = newScale
-                                        if (scale > 1f) {
-                                            offset = Offset(
-                                                x = (offset.x + pan.x).coerceIn(
-                                                    -(size.width * (scale - 1f) / 2f),
-                                                    size.width * (scale - 1f) / 2f
-                                                ),
-                                                y = (offset.y + pan.y).coerceIn(
-                                                    -(size.height * (scale - 1f) / 2f),
-                                                    size.height * (scale - 1f) / 2f
+                                    detectTransformGesturesCustom(scaleProvider = { scale }) { _, pan, zoom, _ ->
+                                        if (scale > 1f || zoom != 1f) {
+                                            val newScale = (scale * zoom).coerceIn(1f, 4f)
+                                            scale = newScale
+                                            if (scale > 1f) {
+                                                offset = Offset(
+                                                    x = (offset.x + pan.x).coerceIn(
+                                                        -(size.width * (scale - 1f) / 2f),
+                                                        size.width * (scale - 1f) / 2f
+                                                    ),
+                                                    y = (offset.y + pan.y).coerceIn(
+                                                        -(size.height * (scale - 1f) / 2f),
+                                                        size.height * (scale - 1f) / 2f
+                                                    )
                                                 )
-                                            )
+                                            } else {
+                                                offset = Offset.Zero
+                                            }
                                         }
                                     }
                                 }
@@ -583,8 +734,12 @@ fun MediaDetailView(
                         }
                     }
                     .clip(CircleShape)
-                    .background(GlassBarFill)
-                    .border(1.dp, GlassBarBorder, CircleShape)
+                    .background(if (isShaderActive) Color.Transparent else GlassBarFill)
+                    .border(
+                        1.dp,
+                        if (isShaderActive) Color.Transparent else GlassBarBorder,
+                        CircleShape
+                    )
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -603,8 +758,12 @@ fun MediaDetailView(
                         }
                     }
                     .clip(CircleShape)
-                    .background(GlassBarFill)
-                    .border(1.dp, GlassBarBorder, CircleShape)
+                    .background(if (isShaderActive) Color.Transparent else GlassBarFill)
+                    .border(
+                        1.dp,
+                        if (isShaderActive) Color.Transparent else GlassBarBorder,
+                        CircleShape
+                    )
                     .padding(horizontal = 16.dp, vertical = 6.dp)
             ) {
                 Text(
@@ -638,8 +797,12 @@ fun MediaDetailView(
                             }
                         }
                         .clip(CircleShape)
-                        .background(GlassBarFill)
-                        .border(1.dp, GlassBarBorder, CircleShape)
+                        .background(if (isShaderActive) Color.Transparent else GlassBarFill)
+                        .border(
+                            1.dp,
+                            if (isShaderActive) Color.Transparent else GlassBarBorder,
+                            CircleShape
+                        )
                 ) {
                     Icon(
                         imageVector = Icons.Default.MoreVert,
@@ -718,6 +881,77 @@ fun MediaDetailView(
                 )
                 .padding(bottom = 12.dp)
         ) {
+            // Filmstrip carousel
+            val carouselListState = rememberLazyListState()
+            LaunchedEffect(pagerState.currentPage) {
+                if (allItems.isNotEmpty()) {
+                    carouselListState.animateScrollToItem(pagerState.currentPage)
+                }
+            }
+
+            LazyRow(
+                state = carouselListState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                itemsIndexed(allItems, key = { _, item -> item.id }) { index, item ->
+                    val isSelected = index == pagerState.currentPage
+                    val scaleAnim by animateFloatAsState(
+                        targetValue = if (isSelected) 1.15f else 1.0f,
+                        label = "carouselScale"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .graphicsLayer {
+                                scaleX = scaleAnim
+                                scaleY = scaleAnim
+                            }
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(
+                                width = 2.dp,
+                                color = if (isSelected) Color(0xFF0A84FF) else Color.Transparent,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable {
+                                scope.launch {
+                                    pagerState.scrollToPage(index)
+                                }
+                            }
+                    ) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(detailContext)
+                                .data(android.net.Uri.parse(item.uri))
+                                .size(120)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                            alpha = if (isSelected) 1f else 0.55f
+                        )
+                        if (item.isVideo) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .align(Alignment.Center)
+                                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                                    .padding(2.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             // B) Tool bar - Simplified: Share left, Favorite/Info/Edit center, Delete right
             Row(
                 modifier = Modifier
@@ -740,9 +974,18 @@ fun MediaDetailView(
                     tint = Color.White,
                     modifier = Modifier
                         .size(44.dp)
+                        .onGloballyPositioned { coords ->
+                            if (coords.isAttached) {
+                                detailShareRect = coords.boundsInRoot()
+                            }
+                        }
                         .clip(CircleShape)
-                        .background(GlassBarFill)
-                        .border(1.dp, GlassBarBorder, CircleShape),
+                        .background(if (isShaderActive) Color.Transparent else GlassBarFill)
+                        .border(
+                            1.dp,
+                            if (isShaderActive) Color.Transparent else GlassBarBorder,
+                            CircleShape
+                        ),
                     icon = { Icon(Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp)) }
                 )
 
@@ -757,7 +1000,8 @@ fun MediaDetailView(
                             }
                         },
                     cornerRadius = 22.dp,
-                    borderAlpha = 0f
+                    borderAlpha = if (isShaderActive) 0f else 1f,
+                    backgroundAlpha = if (isShaderActive) 0f else 1f
                 ) {
                     Row(
                         modifier = Modifier
@@ -837,9 +1081,18 @@ fun MediaDetailView(
                     contentDescription = "Eliminar",
                     modifier = Modifier
                         .size(44.dp)
+                        .onGloballyPositioned { coords ->
+                            if (coords.isAttached) {
+                                detailDeleteRect = coords.boundsInRoot()
+                            }
+                        }
                         .clip(CircleShape)
-                        .background(GlassBarFill)
-                        .border(1.dp, GlassBarBorder, CircleShape),
+                        .background(if (isShaderActive) Color.Transparent else GlassBarFill)
+                        .border(
+                            1.dp,
+                            if (isShaderActive) Color.Transparent else GlassBarBorder,
+                            CircleShape
+                        ),
                     tint = Color.White,
                     icon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp)) }
                 )
@@ -869,7 +1122,9 @@ fun MediaDetailView(
         ) {
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                cornerRadius = 20.dp
+                cornerRadius = 20.dp,
+                borderAlpha = if (isShaderActive) 0f else 1f,
+                backgroundAlpha = if (isShaderActive) 0f else 1f
             ) {
                 Column(
                     modifier = Modifier
@@ -1190,5 +1445,69 @@ fun MediaDetailView(
                 }
             )
         }
+    }
+}
+
+suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectTransformGesturesCustom(
+    panZoomLock: Boolean = false,
+    scaleProvider: () -> Float,
+    onGesture: (centroid: Offset, pan: Offset, zoom: Float, rotation: Float) -> Unit
+) {
+    awaitEachGesture {
+        var rotation = 0f
+        var zoom = 1f
+        var pan = Offset.Zero
+        var pastTouchSlop = false
+        val touchSlop = viewConfiguration.touchSlop
+        var lockedToPanZoomRatio = false
+
+        awaitFirstDown(requireUnconsumed = false)
+        do {
+            val event = awaitPointerEvent()
+            val canceled = event.changes.any { it.isConsumed }
+            if (!canceled) {
+                val zoomChange = event.calculateZoom()
+                val rotationChange = event.calculateRotation()
+                val panChange = event.calculatePan()
+
+                if (!pastTouchSlop) {
+                    zoom *= zoomChange
+                    rotation += rotationChange
+                    pan += panChange
+
+                    val centroidSize = event.calculateCentroidSize(useCurrent = false)
+                    val zoomMotion = kotlin.math.abs(1 - zoom) * centroidSize
+                    val rotationMotion = kotlin.math.abs(rotation) * 45f
+                    val panMotion = pan.getDistance()
+
+                    if (zoomMotion > touchSlop ||
+                        rotationMotion > touchSlop ||
+                        panMotion > touchSlop
+                    ) {
+                        pastTouchSlop = true
+                        lockedToPanZoomRatio = panZoomLock && rotationMotion < touchSlop
+                    }
+                }
+
+                if (pastTouchSlop) {
+                    val centroid = event.calculateCentroid(useCurrent = false)
+                    val effectiveRotation = if (lockedToPanZoomRatio) 0f else rotationChange
+                    if (effectiveRotation != 0f ||
+                        zoomChange != 1f ||
+                        panChange != Offset.Zero
+                    ) {
+                        onGesture(centroid, panChange, zoomChange, effectiveRotation)
+                    }
+                    val currentScale = scaleProvider()
+                    event.changes.forEach {
+                        if (it.positionChanged()) {
+                            if (currentScale > 1f || event.changes.size > 1) {
+                                it.consume()
+                            }
+                        }
+                    }
+                }
+            }
+        } while (!canceled && event.changes.any { it.pressed })
     }
 }

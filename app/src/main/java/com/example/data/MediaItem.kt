@@ -15,7 +15,11 @@ data class MediaItem(
     val isVideo: Boolean = false,
     val isFavorite: Boolean = false,
     val isHidden: Boolean = false,
-    val customAlbum: String? = null
+    val customAlbum: String? = null,
+    val rotation: Float = 0f,
+    val brightness: Float = 0f,
+    val contrast: Float = 1f,
+    val saturation: Float = 1f
 ) {
     val durationString: String?
         get() {
